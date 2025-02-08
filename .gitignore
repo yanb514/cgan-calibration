@@ -1,0 +1,14 @@
+data/*
+figures/*
+unused/*
+**/calibration_result
+**/simulation_result
+*.ipynb
+*.csv
+*.out.xml
+*.pkl
+*.txt
+*.out.xml
+config.json
+**/temp/
+**/_log/
