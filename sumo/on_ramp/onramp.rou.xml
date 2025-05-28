@@ -1,11 +1,57 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <routes>
     
-	<vType id="trial" carFollowModel="IDM" maxSpeed="32.155468058027324" minGap="1.7304751150744706" accel="3.13277526615182" decel="2.2556560753351427" tau="1.376101486623159" lcStrategic="0.7670997584501396" lcCooperative="0.9983358594382765" lcAssertive="0.5716922651157786" lcSpeedGain="1.615401763830451" lcKeepRight="4.302565070438945" lcOvertakeRight="0" />
+	<!-- <vType id="trial" carFollowModel="IDM" maxSpeed="32.155468058027324" minGap="1.7304751150744706" accel="3.13277526615182" decel="2.2556560753351427" tau="1.376101486623159" lcStrategic="0.7670997584501396" lcCooperative="0.9983358594382765" lcAssertive="0.5716922651157786" lcSpeedGain="1.615401763830451" lcKeepRight="4.302565070438945" lcOvertakeRight="0" /> -->
 
     <route id="ramp" edges="ramp E2 E4" />
 	<route id="mainlane" edges="E0 E1 E2 E4 " />
+
+    <!-- Driver Type Definitions -->
+    <vType id="realDriver" vClass="passenger">
+        <param key="maxSpeed" value="norm(50.5,1.0)"/>
+        <param key="minGap" value="norm(2.0,0.2)"/>
+        <param key="accel" value="norm(2.9,0.3)"/>
+        <param key="decel" value="norm(4.5,0.3)"/>
+        <param key="tau" value="norm(1.0,0.1)"/>
+        <param key="lcStrategic" value="norm(1.0,0.1)"/>
+        <param key="lcCooperative" value="norm(1.0,0.1)"/>
+        <param key="lcSpeedGain" value="norm(1.0,0.1)"/>
+        <param key="lcKeepRight" value="norm(1.0,0.1)"/>
+    </vType>
+    
+    <vType id="fakeDriver" vClass="passenger">
+        <param key="maxSpeed" value="norm(31.5,1.5)"/>
+        <param key="minGap" value="norm(1.8,0.3)"/>
+        <param key="accel" value="norm(2.7,0.4)"/> 
+        <param key="decel" value="norm(4.3,0.4)"/>
+        <param key="tau" value="norm(0.9,0.15)"/>
+        <param key="lcStrategic" value="norm(0.9,0.15)"/>
+        <param key="lcCooperative" value="norm(0.9,0.15)"/>
+        <param key="lcSpeedGain" value="norm(0.9,0.15)"/>
+        <param key="lcKeepRight" value="norm(0.9,0.15)"/>
+    </vType>
 	
-    <flow id="mainlane" type="trial" begin="0" end="300" vehsPerHour="5000" route="mainlane" departLane="random" departSpeed="desired" />
-    <flow id="ramp_0" type="trial" begin="0" end="300" vehsPerHour="1000" route="ramp" departLane="random" departSpeed="speedLimit" />
+    <!-- <flow id="mainlane" type="trial" begin="0" end="300" vehsPerHour="5000" route="mainlane" departLane="random" departSpeed="desired" />
+    <flow id="ramp_0" type="trial" begin="0" end="300" vehsPerHour="1000" route="ramp" departLane="random" departSpeed="speedLimit" /> -->
+        <!-- Main flow: 30 second intervals with peak in middle -->
+    <flow id="mainflow_1" type="trial" route="mainline" begin="0" end="30" vehsPerHour="1000"/>
+    <flow id="mainflow_2" type="trial" route="mainline" begin="30" end="60" vehsPerHour="2000"/>
+    <flow id="mainflow_3" type="trial" route="mainline" begin="60" end="90" vehsPerHour="3000"/>
+    <flow id="mainflow_4" type="trial" route="mainline" begin="90" end="120" vehsPerHour="4000"/>
+    <flow id="mainflow_5" type="trial" route="mainline" begin="120" end="150" vehsPerHour="5000"/>
+    <flow id="mainflow_6" type="trial" route="mainline" begin="150" end="180" vehsPerHour="4000"/>
+    <flow id="mainflow_7" type="trial" route="mainline" begin="180" end="210" vehsPerHour="3000"/>
+    <flow id="mainflow_8" type="trial" route="mainline" begin="210" end="240" vehsPerHour="2000"/>
+    <flow id="mainflow_9" type="trial" route="mainline" begin="240" end="270" vehsPerHour="1000"/>
+
+    <!-- Ramp flow: Similar pattern but lower volumes -->
+    <flow id="rampflow_1" type="trial" route="ramp" begin="0" end="30" vehsPerHour="200"/>
+    <flow id="rampflow_2" type="trial" route="ramp" begin="30" end="60" vehsPerHour="400"/>
+    <flow id="rampflow_3" type="trial" route="ramp" begin="60" end="90" vehsPerHour="600"/>
+    <flow id="rampflow_4" type="trial" route="ramp" begin="90" end="120" vehsPerHour="800"/>
+    <flow id="rampflow_5" type="trial" route="ramp" begin="120" end="150" vehsPerHour="1000"/>
+    <flow id="rampflow_6" type="trial" route="ramp" begin="150" end="180" vehsPerHour="800"/>
+    <flow id="rampflow_7" type="trial" route="ramp" begin="180" end="210" vehsPerHour="600"/>
+    <flow id="rampflow_8" type="trial" route="ramp" begin="210" end="240" vehsPerHour="400"/>
+    <flow id="rampflow_9" type="trial" route="ramp" begin="240" end="270" vehsPerHour="200"/>
 </routes>

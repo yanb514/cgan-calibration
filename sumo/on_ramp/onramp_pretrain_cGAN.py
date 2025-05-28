@@ -1,12 +1,15 @@
 """
-1. Obtain training data
-    a. obtain "real" detector ouputs (.out.xml)
-        a. Fixed parameters, mildly varying demands
-    b. obtain "fake" detector outputs
-        a. Varying parameters, mildly varying demands
-2. save data in
-    /data/SCENARIO/real
-    /data/SCENARio/sim
+High-Level Description:
+This script is designed to generate training data for a Conditional Generative Adversarial Network (cGAN) to calibrate traffic simulation models. It uses the SUMO (Simulation of Urban Mobility) traffic simulator to produce two types of data:
+1. Real data: Generated with fixed parameters and mildly varying demands.
+2. Simulated (fake) data: Generated with varying parameters and mildly varying demands.
+
+The script saves the generated data in the following directories:
+- /data/SCENARIO/real: Contains real traffic data.
+- /data/SCENARIO/sim: Contains simulated traffic data.
+
+The script also includes functionality for training a discriminator model to distinguish between real and simulated traffic patterns.
+
 """
 import os
 import numpy as np
@@ -35,16 +38,21 @@ from onramp_calibrate import clear_directory
 
 # ================ Configuration ====================
 SCENARIO = "onramp"
-FLOW_STD = 5
+FLOW_STD = 5  # standard deviation for simulated data
+FLOW_STD_REAL = 5  # slightly larger standard deviation for real data to create more variation
 with open('../config.json', 'r') as config_file:
     config = json.load(config_file)
 measurement_locations = ['upstream_0', 'upstream_1', 'merge_0', 'merge_1', 'merge_2', 'downstream_0', 'downstream_1']
 
-# Define parameter ranges for calibration
+# Define parameter ranges for calibration (simulated data)
 
 param_names = ['maxSpeed', 'minGap', 'accel', 'decel', 'tau', 'lcStrategic', 'lcCooperative', 'lcAssertive', 'lcSpeedGain', 'lcKeepRight']
-min_val = [30.0, 1.0, 1.0, 1.0, 0.5, 0, 0, 0.0001, 0, 0]  
-max_val = [35.0, 3.0, 4.0, 3.0, 2.0, 5, 1, 5,      5, 5] 
+min_val = [30.0, 1.0, 1.0, 1.0, 0.5, 0, 0, 0.0001, 0, 0]
+max_val = [35.0, 3.0, 4.0, 3.0, 2.0, 5, 1, 5,      5, 5]
+
+# Define parameter ranges for real data generation with more overlapping
+real_min_val = [29.5, 0.8, 0.8, 0.8, 0.4, 0, 0, 0.0001, 0, 0]  # slightly wider range
+real_max_val = [35.5, 3.2, 4.2, 3.2, 2.2, 5.5, 1.2, 5.5, 5.5, 5.5]
 
 # ================ Discriminator Model ====================
 
@@ -52,6 +60,11 @@ def simulate_real_worker(i, measurement_locations):
     """
     Runs SUMO for a single sample and extracts traffic patterns.
     """
+    # Generate random driver parameters
+    # driver_param = {
+    #     param_name: random.uniform(real_min_val[i], real_max_val[i])
+    #     for i, param_name in enumerate(param_names)
+    # }
     temp_config_path, temp_path = create_temp_config(param=None, trial_number=i, type="real")
     run_sumo(temp_config_path)
 
@@ -76,10 +89,34 @@ def simulate_real_worker(i, measurement_locations):
 def generate_real_data(num_samples, suffix):
     """
     Generate real traffic data samples using SUMO in parallel.
+
+    Args:
+        num_samples (int): The number of real data samples to generate.
+        suffix (str): The suffix to add to the saved file names.
+
+    Description:
+        This function uses the SUMO traffic simulator to generate real traffic data. It runs SUMO simulations in parallel using multiprocessing. The SUMO configuration for real data generation involves fixed vehicle parameters and mildly varying demands. The traffic patterns and demand data are extracted and saved as tensors.
+
+        SUMO Configuration:
+        - The route file (.rou.xml) is based on a ground truth file (`SCENARIO_gt.rou.xml`).
+        - Noise is added to the vehicle flow rates using a Gaussian distribution with a standard deviation defined by `FLOW_STD`.
+
+    Returns:
+        None
+    """
+    """
+    Generate real traffic data samples using SUMO in parallel.
+
+    Args:
+        num_samples (int): The number of real data samples to generate.
+        suffix (str): The suffix to add to the saved file names.
+
+    Returns:
+        None
     """
 
     # Use multiprocessing to parallelize the SUMO runs
-    with multiprocessing.Pool(processes=min(num_samples, multiprocessing.cpu_count())) as pool:
+    with multiprocessing.Pool(processes=min(4, num_samples)) as pool:
         results = pool.map(partial(simulate_real_worker, measurement_locations=measurement_locations), range(num_samples))
 
     # Separate traffic and demand for saving
@@ -88,11 +125,9 @@ def generate_real_data(num_samples, suffix):
 
     # Convert the list of traffic patterns to a tensor
     traffic_patterns_tensor = torch.tensor(np.array(traffic_patterns), dtype=torch.float32)
-    print(f"Traffic patterns tensor shape: {traffic_patterns_tensor.shape}")
 
     # Convert the list of demand data to a tensor
     demand_tensor = torch.tensor(np.array(demand_data), dtype=torch.float32)
-    print(f"Demand tensor shape: {demand_tensor.shape}")
 
     # Clear temporary directory
     clear_directory("temp")
@@ -118,13 +153,13 @@ def simulate_sim_worker(i, measurement_locations):
     Runs SUMO for a single sample and extracts traffic patterns and demand.
     """
     # Generate random driver parameters
-    driver_param = {
-        param_name: random.uniform(min_val[i], max_val[i])
-        for i, param_name in enumerate(param_names)
-    }
+    # driver_param = {
+    #     param_name: random.uniform(min_val[i], max_val[i])
+    #     for i, param_name in enumerate(param_names)
+    # }
 
     # Create temp configuration for the simulation
-    temp_config_path, temp_path = create_temp_config(param=driver_param, trial_number=i, type="sim")
+    temp_config_path, temp_path = create_temp_config(param=None, trial_number=i, type="sim")
     
     # Run SUMO simulation
     run_sumo(temp_config_path)
@@ -150,6 +185,24 @@ def simulate_sim_worker(i, measurement_locations):
 
 def generate_sim_data(num_samples, suffix):
     """
+    Generate simulated (fake) traffic data samples using SUMO in parallel.
+
+    Args:
+        num_samples (int): The number of simulated data samples to generate.
+        suffix (str): The suffix to add to the saved file names.
+
+    Description:
+        This function uses the SUMO traffic simulator to generate simulated traffic data. It runs SUMO simulations in parallel using multiprocessing. The SUMO configuration for simulated data generation involves varying vehicle parameters and mildly varying demands. The traffic patterns and demand data are extracted and saved as tensors.
+
+        SUMO Configuration:
+        - The route file (.rou.xml) is modified to include randomized vehicle parameters (e.g., maxSpeed, minGap, accel, etc.).
+        - Noise is added to the vehicle flow rates using a Gaussian distribution with a standard deviation defined by `FLOW_STD`.
+
+    Returns:
+        traffic_patterns_tensor (Tensor): Tensor containing traffic patterns.
+        demand_tensor (Tensor): Tensor containing demand data.
+    """
+    """
     Generate real traffic data samples using SUMO in parallel.
     """
 
@@ -164,15 +217,9 @@ def generate_sim_data(num_samples, suffix):
 
     # Convert the list of traffic patterns to a tensor
     traffic_patterns_tensor = torch.tensor(np.array(traffic_patterns), dtype=torch.float32)
-    
-    # Print shape to confirm
-    print(f"Traffic patterns tensor shape: {traffic_patterns_tensor.shape}")
 
     # Convert the list of demand data to a tensor
     demand_tensor = torch.tensor(np.array(demand_data), dtype=torch.float32)
-    
-    # Print shape to confirm
-    print(f"Demand tensor shape: {demand_tensor.shape}")
 
     # Clear temporary directory
     clear_directory("temp")
@@ -205,30 +252,38 @@ def create_temp_config(param, trial_number, type="real"):
     os.makedirs(output_dir, exist_ok=True)
     
     # Update .rou.xml file with new parameters
-    if type == "real": # do not change parameters, add noise on flw
-        # shutil.copy(f"{SCENARIO}_gt.rou.xml", os.path.join(output_dir, f"{trial_number}_{SCENARIO}.rou.xml"))
-        rou_tree = ET.parse(f"{SCENARIO}_gt.rou.xml")
+    if type == "real":
+        # For real data, use the base route file but only modify flow rates
+        rou_tree = ET.parse(f"{SCENARIO}.rou.xml")
         rou_root = rou_tree.getroot()
+        # Keep original vehicle type parameters for real data
         for flow in rou_root.findall('flow'):
             vph = float(flow.get("vehsPerHour"))
-            flow.set("vehsPerHour", str(vph + random.gauss(0, FLOW_STD)))
-        new_rou_file_path = os.path.join(output_dir, f"{trial_number}_{SCENARIO}.rou.xml")
-        rou_tree.write(new_rou_file_path, encoding='UTF-8', xml_declaration=True)
-        
+            flow.set("vehsPerHour", str(vph + random.gauss(0, FLOW_STD_REAL)))
+            flow.set("type", "realDriver")
+            
+        # for vtype in rou_root.findall('vType'):
+        #     if vtype.get('id') == 'trial':
+        #         for key, val in param.items():
+        #             vtype.set(key, str(val))
+        #         break
+                
     else: # change parameters and add noise on flow
         rou_tree = ET.parse(f"{SCENARIO}.rou.xml")
         rou_root = rou_tree.getroot()
-        for vtype in rou_root.findall('vType'):
-            if vtype.get('id') == 'trial':
-                for key, val in param.items():
-                    vtype.set(key, str(val))
-                break
+        # for vtype in rou_root.findall('vType'):
+        #     if vtype.get('id') == 'trial':
+        #         for key, val in param.items():
+        #             vtype.set(key, str(val))
+        #         break
         for flow in rou_root.findall('flow'):
             vph = float(flow.get("vehsPerHour"))
             flow.set("vehsPerHour", str(vph + random.gauss(0, FLOW_STD)))
-        new_rou_file_path = os.path.join(output_dir, f"{trial_number}_{SCENARIO}.rou.xml")
-        rou_tree.write(new_rou_file_path, encoding='UTF-8', xml_declaration=True)
-        
+            flow.set("type", "fakeDriver")
+            
+    new_rou_file_path = os.path.join(output_dir, f"{trial_number}_{SCENARIO}.rou.xml")
+    rou_tree.write(new_rou_file_path, encoding='UTF-8', xml_declaration=True)
+    
     # Copy other necessary files
     shutil.copy(f"{SCENARIO}.net.xml", os.path.join(output_dir, f"{trial_number}_{SCENARIO}.net.xml"))
     shutil.copy('detectors.add.xml', os.path.join(output_dir, f"{trial_number}_detectors.add.xml"))
@@ -281,6 +336,12 @@ def extract_od_matrix(temp_path):
     
     return demand_matrix
 
+def normalize_traffic_patterns(traffic_patterns):
+    """Normalize traffic patterns to the range [0, 1]."""
+    max_val = torch.max(traffic_patterns)
+    min_val = torch.min(traffic_patterns)
+    return (traffic_patterns - min_val) / (max_val - min_val)
+
 
 class Discriminator(nn.Module):
     def __init__(self, traffic_shape, od_shape):
@@ -293,46 +354,47 @@ class Discriminator(nn.Module):
         self.traffic_conv = nn.Sequential(
             nn.Conv3d(in_channels=self.features, out_channels=32, kernel_size=(3, 3, 3), padding=1),
             nn.LeakyReLU(0.2),
-            nn.MaxPool3d(kernel_size=(2, 2, 1)),  # Reduces space and time dimensions
             nn.Conv3d(in_channels=32, out_channels=64, kernel_size=(3, 3, 3), padding=1),
+            nn.LeakyReLU(0.2),
+            nn.MaxPool3d(kernel_size=(1, 2, 1)),
+            nn.Conv3d(in_channels=64, out_channels=128, kernel_size=(3, 3, 3), padding=1),
             nn.LeakyReLU(0.2),
             nn.Flatten()
         )
 
-        # Correct traffic_output_size calculation
-        self.traffic_output_size = 64 * (self.space // 2) * (self.time // 2) * 1  # 64 * 3 * 5 * 1 = 960
+        # Calculate traffic_output_size correctly
+        with torch.no_grad():
+            dummy_input = torch.randn(1, self.features, self.space, self.time, 1)
+            dummy_output = self.traffic_conv(dummy_input)
+            self.traffic_output_size = dummy_output.shape[1]
 
         # ==================== OD Matrix Branch ====================
         self.od_conv = nn.Sequential(
-            nn.utils.spectral_norm((nn.Conv1d(in_channels=self.routes, out_channels=32, kernel_size=3, padding=1))),
+            nn.utils.spectral_norm(nn.Conv1d(in_channels=self.routes, out_channels=32, kernel_size=3, padding=1)),
             nn.LeakyReLU(0.2),
-            nn.utils.spectral_norm((nn.Conv1d(in_channels=32, out_channels=64, kernel_size=3, padding=1))),
+            nn.utils.spectral_norm(nn.Conv1d(in_channels=32, out_channels=64, kernel_size=3, padding=1)),
             nn.LeakyReLU(0.2),
             nn.Flatten()
         )
 
-        # Correct od_output_size (no pooling applied)
-        self.od_output_size = 64 * self.time_intervals  # 64 * 1 = 64
+        # Calculate od_output_size correctly
+        with torch.no_grad():
+            dummy_od = torch.randn(1, self.routes, self.time_intervals)
+            dummy_od_output = self.od_conv(dummy_od)
+            self.od_output_size = dummy_od_output.shape[1]
 
         # ==================== Fully Connected Layers ====================
         self.fc = nn.Sequential(
-            nn.Linear(self.traffic_output_size + self.od_output_size, 128),  # 960 + 64 = 1024
+            nn.Linear(self.traffic_output_size + self.od_output_size, 64),
             nn.LeakyReLU(0.2),
-            # nn.BatchNorm1d(128),  # Normalize activations
-            nn.Linear(128, 1)
-            # nn.Sigmoid()
+            nn.Dropout(0.5),
+            nn.Linear(64, 1)
         )
 
     def forward(self, traffic_pattern, od_matrix):
         traffic_pattern = traffic_pattern.permute(0, 3, 1, 2).unsqueeze(-1)
-        # print("Traffic input:", traffic_pattern.shape)
         traffic_features = self.traffic_conv(traffic_pattern)
-        # print("Traffic features:", traffic_features.shape)
-        
-        # print("OD input:", od_matrix.shape)
         od_features = self.od_conv(od_matrix)
-        # print("OD features:", od_features.shape)
-        
         combined = torch.cat([traffic_features, od_features], dim=1)
         output = self.fc(combined)
         return output
@@ -466,8 +528,6 @@ def evaluate_discriminator(discriminator, real_traffic_patterns, real_od_matrice
             # Get discriminator predictions
             outputs = discriminator(traffic_patterns, od_matrices).squeeze()  # Shape: (batch_size,)
             preds = torch.sigmoid(outputs)  # Apply sigmoid to get probabilities
-            print(preds)
-            # print(preds, labels)
             preds = (outputs > 0.5).float()  # Convert probabilities to binary predictions (0 or 1)
 
             # Store predictions and labels
@@ -495,7 +555,7 @@ def evaluate_discriminator(discriminator, real_traffic_patterns, real_od_matrice
 
 # ================ Main Script ====================
 if __name__ == "__main__":
-    # Initialize logging
+    # ================== Initialize logging ===================
     # current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     # log_dir = '_log'
     # if not os.path.exists(log_dir):
@@ -504,53 +564,59 @@ if __name__ == "__main__":
     # logging.basicConfig(filename=log_file, level=logging.INFO, format='%(asctime)s - %(message)s')
 
 
-    # Generate training and testing data
-    # clear_directory("temp")
-    # num_train_samples = 100
-    # num_test_samples = 50
-    # generate_real_data(num_samples=num_train_samples, suffix="train")
+    # ================== Generate training and testing data ==================
+    clear_directory("temp")
+
+    # Configure parallel processing
+    num_train_samples = 2
+    num_test_samples = 2
+    max_workers = min(multiprocessing.cpu_count(), 8)  # Use at most 8 cores to avoid overloading
+
+    generate_real_data(num_samples=num_train_samples, suffix="train")
     # generate_sim_data(num_samples=num_train_samples, suffix="train")
     # generate_real_data(num_samples=num_test_samples, suffix="test")
     # generate_sim_data(num_samples=num_test_samples, suffix="test")
 
-    # # Load data for discriminator training
-    real_traffic_train = torch.load(f"../../data/{SCENARIO}/real/traffic_patterns_train.pt",weights_only=True)
-    real_od_train = torch.load(f"../../data/{SCENARIO}/real/demand_train.pt",weights_only=True)
-    sim_traffic_train = torch.load(f"../../data/{SCENARIO}/sim/traffic_patterns_train.pt",weights_only=True)
-    sim_od_train = torch.load(f"../../data/{SCENARIO}/sim/demand_train.pt",weights_only=True)
+    # ================== Load data for discriminator training ==================
+    # real_traffic_train = torch.load(f"../../data/{SCENARIO}/real/traffic_patterns_train.pt",weights_only=True)
+    # real_od_train = torch.load(f"../../data/{SCENARIO}/real/demand_train.pt",weights_only=True)
+    # sim_traffic_train = torch.load(f"../../data/{SCENARIO}/sim/traffic_patterns_train.pt",weights_only=True)
+    # sim_od_train = torch.load(f"../../data/{SCENARIO}/sim/demand_train.pt",weights_only=True)
+    # # Load data for discriminator testing
+    # real_traffic_test = torch.load(f"../../data/{SCENARIO}/real/traffic_patterns_test.pt",weights_only=True)
+    # real_od_test = torch.load(f"../../data/{SCENARIO}/real/demand_test.pt",weights_only=True)
+    # sim_traffic_test = torch.load(f"../../data/{SCENARIO}/sim/traffic_patterns_test.pt",weights_only=True)
+    # sim_od_test = torch.load(f"../../data/{SCENARIO}/sim/demand_test.pt",weights_only=True)
+    # # Normalize traffic patterns
+    # real_traffic_train = normalize_traffic_patterns(real_traffic_train)
+    # sim_traffic_train = normalize_traffic_patterns(sim_traffic_train)
+    # real_traffic_test = normalize_traffic_patterns(real_traffic_test)
+    # sim_traffic_test = normalize_traffic_patterns(sim_traffic_test)
 
-    # Initialize the discriminator
-    discriminator = Discriminator(real_traffic_train.shape, real_od_train.shape)
+    # # ================== Train the discriminator ==================
+    # discriminator = Discriminator(real_traffic_train.shape, real_od_train.shape)
+    # train_discriminator(discriminator, real_traffic_train, real_od_train, sim_traffic_train, sim_od_train)
+    # torch.save(discriminator.state_dict(), "discriminator.pth")
 
-    # Run optimization
-    train_discriminator(discriminator, real_traffic_train, real_od_train, sim_traffic_train, sim_od_train)
-    torch.save(discriminator.state_dict(), "discriminator.pth")
+    # # # ================== Load the pretrained model ==================
+    # # discriminator = Discriminator(real_traffic_test.shape, real_od_test.shape)
+    # # discriminator.load_state_dict(torch.load("discriminator.pth", weights_only=True))
 
-    # Load data for discriminator testing
-    real_traffic_test = torch.load(f"../../data/{SCENARIO}/real/traffic_patterns_test.pt",weights_only=True)
-    real_od_test = torch.load(f"../../data/{SCENARIO}/real/demand_test.pt",weights_only=True)
-    sim_traffic_test = torch.load(f"../../data/{SCENARIO}/sim/traffic_patterns_test.pt",weights_only=True)
-    sim_od_test = torch.load(f"../../data/{SCENARIO}/sim/demand_test.pt",weights_only=True)
+    # # # ================== Start evaluation (Testing) ==================
+    # result = evaluate_discriminator(discriminator, real_traffic_test, real_od_test, sim_traffic_test, sim_od_test)
+    # print(result)
 
-    # Load the pretrained model
-    # discriminator = Discriminator(real_traffic_test.shape, real_od_test.shape)
-    # discriminator.load_state_dict(torch.load("discriminator.pth", weights_only=True))
-
-    # Start evaluation (Testing)
-    result = evaluate_discriminator(discriminator, real_traffic_test, real_od_test, sim_traffic_test, sim_od_test)
-    print(result)
-
-    # print(sim_traffic_test[0])
-
-    ## plot samples
+    # # ================== plot training samples ==================
     # import matplotlib.pyplot as plt
     # # Extract relevant dimensions
     # sample_size, space, time, features = real_traffic_test.shape
     # assert sim_traffic_test.shape == real_traffic_test.shape, "Real and Sim data must have the same shape"
+    # print("sample size ", sample_size, space, time, features)
 
-    # # Select the first feature
-    # real_traffic_feature = real_traffic_test[:, :, :, 2]  # Shape: (sample_size, space, time)
-    # sim_traffic_feature = sim_traffic_test[:, :, :, 2]  # Shape: (sample_size, space, time)
+    # # Select one feature to visualize
+    # feature_idx = 1
+    # real_traffic_feature = real_traffic_train[:, :, :, feature_idx]  # Shape: (sample_size, space, time, features)
+    # sim_traffic_feature = sim_traffic_train[:, :, :, feature_idx]  # Shape: (sample_size, space, time, features)
 
     # # Create subplots for each space dimension
     # fig, axes = plt.subplots(nrows=space, figsize=(10, 2 * space), sharex=True)
@@ -558,15 +624,16 @@ if __name__ == "__main__":
     # if space == 1:
     #     axes = [axes]  # Ensure axes is iterable when space = 1
 
+    # num_plot_samples = 20  # Increase the number of samples for plotting
     # for i in range(space):
     #     ax = axes[i]
         
     #     # Plot all real traffic samples in red
-    #     for j in range(sample_size):
+    #     for j in range(min(num_plot_samples, sample_size)):  # Limit to available samples
     #         ax.plot(real_traffic_feature[j, i, :], color="red", alpha=0.5, label="Real" if j == 0 else "")
         
     #     # Plot all simulated traffic samples in blue
-    #     for j in range(sample_size):
+    #     for j in range(min(num_plot_samples, sample_size)):  # Limit to available samples
     #         ax.plot(sim_traffic_feature[j, i, :], color="blue", alpha=0.5, label="Sim" if j == 0 else "")
         
     #     ax.set_title(measurement_locations[i])

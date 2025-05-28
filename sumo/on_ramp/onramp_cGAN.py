@@ -115,7 +115,7 @@ def objective(trial):
     return adversarial_loss.item()
 
 
-def logging_callback(study, trial):
+def loggintg_callback(study, trial):
     # if trial.state == optuna.trial.TrialState.COMPLETE:
     #     logging.info(f'Trial {trial.number} succeeded: value={trial.value}, params={trial.params}')
     if trial.state == optuna.trial.TrialState.FAIL:
